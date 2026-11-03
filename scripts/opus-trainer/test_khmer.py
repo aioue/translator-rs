@@ -136,6 +136,47 @@ def test_prep_khmer_digits_match_ascii():
     assert prep_data.num_mismatch_ok("we have 20 bacteria", "យើងមាន ២០ បាក់តេរី", 1.0)
 
 
+def test_prep_numbers_touching_khmer_letters():
+    pytest.importorskip("fasttext")
+    import prep_data
+
+    ok = prep_data.num_mismatch_ok
+    # Khmer has no spaces: a figure sits against the letters around it
+    assert ok("aged 51, accused of misconduct", "អាយុ 51ឆ្នាំត្រូវបានចោទ", 1.0)
+    assert ok("at least 60 were killed", "មនុស្សយ៉ាងតិច60នាក់បានស្លាប់", 1.0)
+    assert ok("on 86 minutes", "នៅ86នាទី", 1.0)
+    # English ordinals ("20th") are read too when the pair has Khmer
+    assert ok("the 20th century", "សតវត្សទី20", 1.0)
+    assert ok("the third level, 3rd", "ទី៣", 1.0)
+    # a real mismatch still fails
+    assert not ok("aged 51", "អាយុ 52ឆ្នាំ", 1.0)
+    assert not ok("60 were killed", "មនុស្សបានស្លាប់", 1.0)
+    # a figure glued to a Latin letter, or inside a longer figure, is not split out
+    assert prep_data._nums_unspaced("ម៉ូដែល A5") == set()
+    assert prep_data._nums_unspaced("ចំនួន 5,000 នាក់") == {"5*000"}
+
+
+def test_prep_number_check_unchanged_without_khmer():
+    pytest.importorskip("fasttext")
+    import prep_data
+
+    # no Khmer in the pair: the original \\b behaviour, so other languages are identical
+    def old(s, t, ratio):
+        a, b = prep_data._nums(s), prep_data._nums(t)
+        return (not a and not b) or (len(a & b) + 1) / (len(a ^ b) + 1) >= ratio
+
+    pairs = [
+        ("the 20th century", "ს20სუკუნე"),          # Georgian letters touching a figure
+        ("we have 20 bacteria", "wir haben 21 Bakterien"),
+        ("we have 20 bacteria", "wir haben 20 Bakterien"),
+        ("iPhone12 costs 5,000", "iPhone12 kostet 5000"),
+        ("aged 51", "ასაკი 51წელი"),
+        ("room 101", "otaq 101-ci"),
+    ]
+    for s, t in pairs:
+        assert prep_data.num_mismatch_ok(s, t, 1.0) == old(s, t, 1.0), (s, t)
+
+
 def test_ui_word_check_accepts_khmer():
     import registers
 

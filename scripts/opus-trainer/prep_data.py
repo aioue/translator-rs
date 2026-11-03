@@ -254,8 +254,41 @@ def _nums(s: str) -> set[str]:
     return {(m["sign"] or "") + re.sub(r"[^\d]+", "*", m["value"]) for m in NUM_EXPR.finditer(s)}
 
 
+# NUM_EXPR's \b needs a word boundary on both sides of a number, and Python counts
+# a Khmer letter as a word character. Khmer is written without spaces, so a figure
+# sits directly against the letters around it ("86នាទី", "ទី20", "ទី២"), \b finds
+# no boundary, and the Khmer side yields no number at all: 1,296 of the 1,878 pairs
+# of the professionally translated ALT corpus that failed this check were that
+# case, plus 212 where the English "20th" is the side with no match. Only
+# digit-adjacency matters here, so this pattern lets letters touch a number; it
+# still refuses a number glued to a Latin letter or inside a longer figure, as \b
+# did ("A5", "5,000" stays one figure). Used only when a pair contains Khmer, so no
+# other language's filtering changes.
+NUM_EXPR_UNSPACED = re.compile(r"""
+    (?:
+        (?P<sign>(?:(?<=\s)|^)[-+])
+        |(?<![A-Za-z\d_.,:])
+    )
+    (?:0*)
+    (?P<value>\d+(?:[.,:]\d+)*)
+    (?!\d)
+""", re.X)
+
+
+def _has_unspaced_script(s: str) -> bool:
+    return any(lo <= ord(c) <= hi for c in s for lo, hi in UNSPACED)
+
+
+def _nums_unspaced(s: str) -> set[str]:
+    s = _ascii_digits(s)
+    return {(m["sign"] or "") + re.sub(r"[^\d]+", "*", m["value"]) for m in NUM_EXPR_UNSPACED.finditer(s)}
+
+
 def num_mismatch_ok(s: str, t: str, ratio: float) -> bool:
-    a, b = _nums(s), _nums(t)
+    if _has_unspaced_script(s) or _has_unspaced_script(t):
+        a, b = _nums_unspaced(s), _nums_unspaced(t)
+    else:
+        a, b = _nums(s), _nums(t)
     if not a and not b:
         return True
     return (len(a & b) + 1) / (len(a ^ b) + 1) >= ratio
