@@ -5,7 +5,7 @@ Loads prep_data.py + registers.py from two directories (for example a
 `git show <base>:...` export and the working tree), runs both versions'
 clean_pair() and register extras over the same raw OPUS zips, and counts pairs
 whose result differs. The Khmer changes are gated to unspaced-script lines; on
-en-ka, en-tl and en-ug TED2020 + Tatoeba (42,528 pairs) this reported 0 diffs.
+en-ka, en-tl and en-ug TED2020 + Tatoeba (46,528 pairs) this reported 0 diffs.
 
     mkdir /tmp/base && for f in prep_data.py registers.py; do
         git show main:scripts/opus-trainer/$f > /tmp/base/$f; done
