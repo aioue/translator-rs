@@ -33,6 +33,8 @@ def check(spec, en: str, km_text: str, band: str = "w04_08",
 
 def test_km_spec_loads(km):
     assert km.code == "km"
+    # 5, not prep_data's 6.0: the generator writes signs and labels, and short
+    # Khmer text runs fewer characters per English word (Tatoeba: 4.1).
     assert km.target_chars_per_word == 5
     assert {r.name for r in km.registers} == {"signage", "labels", "menus", "ui", "notices"}
 
@@ -140,3 +142,18 @@ def test_ui_word_check_accepts_khmer():
     assert registers.has_word("ដាក់ស្នើ")
     assert registers.ui_strip("Submit", "ដាក់ស្នើ") == ("Submit", "ដាក់ស្នើ")
     assert not registers.has_word("%02d:%02d")
+
+
+def test_prep_long_khmer_phrase_is_not_a_long_word():
+    pytest.importorskip("fasttext")
+    import prep_data
+
+    phrase = "ក" * 160  # one space-free phrase longer than --max-word-len
+    assert prep_data.max_word_ok("Hello there", phrase, 150)
+    assert not prep_data.max_word_ok("x" * 160, "សួស្តី", 150)  # Latin still guarded
+
+
+def test_sentence_starting_with_khmer_digit_splits():
+    # Mirrors the runtime: any Khmer character, digits included, can open the
+    # next sentence.
+    assert split("តម្លៃឡើងថ្លៃ។ ១០០ រៀលក្នុងមួយគីឡូ។") == ["តម្លៃឡើងថ្លៃ។", "១០០ រៀលក្នុងមួយគីឡូ។"]

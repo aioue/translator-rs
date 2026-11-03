@@ -40,12 +40,12 @@ NONBREAKING = [
 NONBREAKING_SET = {p.rstrip(".").lower() for p in NONBREAKING}
 
 # Terminal punctuation, an optional closing quote, whitespace, then something
-# that can open a sentence: a capital, a Georgian letter, a Khmer consonant or
-# independent vowel (U+1780-17B3), or an opening quote. Khmer ends a sentence
+# that can open a sentence: a capital, a Georgian letter, any Khmer character
+# (U+1780-17FF, as the runtime's unicameral rule accepts), or an opening quote. Khmer ends a sentence
 # with the khan ។ (U+17D4) and a passage with the bariyoosan ៕ (U+17D5); its
 # spaces separate phrases, not sentences, so the khan is what has to split.
 # Keep in sync with the runtime regex in sentence_split.rs.
-CANDIDATE = re.compile(r'[.!?\u2026।॥։۔؟።፧។៕]["”\']?\s+(?=[A-Zა-ჿᲐ-Ჿ\u1780-\u17B3"“„])')
+CANDIDATE = re.compile(r'[.!?\u2026।॥։۔؟።፧។៕]["”\']?\s+(?=[A-Zა-ჿᲐ-Ჿ\u1780-\u17FF"“„])')
 LAST_WORD = re.compile(r'(\S+)$')
 
 

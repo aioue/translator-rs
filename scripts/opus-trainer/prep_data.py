@@ -206,15 +206,17 @@ def _alpha_ratio_unspaced(s: str, word_ratio: float, alpha_ratio: float) -> bool
     return nonspace > 0 and letters / nonspace >= alpha_ratio
 
 
-# Scripts written without spaces between words: Thai, Lao, Myanmar, Khmer. Their
-# spaces separate phrases, so `split()` undercounts words several-fold (median
+# Khmer is written without spaces between words: its spaces separate phrases,
+# so `split()` undercounts words several-fold (median
 # 4.5 English tokens per Khmer token on TED2020/tico-19) and the token-ratio
 # filter dropped 68% of those human-translated corpora. For such a line the word
 # count is estimated from characters instead. CHARS_PER_WORD is measured for
 # Khmer as non-space characters per English word on human bitext: median 6.0 over
 # 4,358 TED2020 + tico-19 + Tatoeba pairs (5.3 TED, 6.3 tico, 4.1 for Tatoeba's
-# short sentences). Re-measure for Thai/Lao/Burmese before relying on it there.
-UNSPACED = ((0x0E00, 0x0EFF), (0x1000, 0x109F), (0x1780, 0x17FF), (0x19E0, 0x19FF))
+# short sentences). Khmer blocks only: Thai, Lao and Burmese share the problem
+# but CHARS_PER_WORD has not been measured for them, so add their ranges together
+# with their own measurement.
+UNSPACED = ((0x1780, 0x17FF), (0x19E0, 0x19FF))
 CHARS_PER_WORD = 6.0
 
 # Per-language characters forced to single SentencePiece pieces (see the SPM
@@ -264,7 +266,10 @@ def url_mismatch_ok(s: str, t: str) -> bool:
 
 
 def max_word_ok(s: str, t: str, limit: int) -> bool:
-    return not any(len(tok) > limit for field in (s, t) for tok in field.split(" "))
+    # A space-separated "word" on a Khmer line is a phrase and can legitimately
+    # run past `limit` characters; word_count() and max_chars already bound it.
+    return not any(len(tok) > limit for field in (s, t) if not is_unspaced(field)
+                   for tok in field.split(" "))
 
 
 # A DECODE-HANG GUARD, not a quality rule, and the threshold is set accordingly.
@@ -407,6 +412,10 @@ def _clean_batch(task: tuple[str, list]) -> tuple[str, int, list[str]]:
             # coverage; pass short pairs through on the non-LID filters alone.
             short = (
                 args.lid_bypass_tokens > 0
+                # Deliberately split(), not word_count(): an unspaced Khmer UI
+                # string is one whitespace token, so it keeps the bypass. Counting
+                # it in estimated words sent short Khmer lines to LID, which is
+                # unreliable on them, and translatewiki en-km fell from 71% to 66%.
                 and len(s.split()) <= args.lid_bypass_tokens
                 and len(t.split()) <= args.lid_bypass_tokens
             )

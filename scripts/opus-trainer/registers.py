@@ -123,8 +123,8 @@ STRFTIME = re.compile(r"%[aAbBcCdDeFgGhHIjklmMnprRsSTuUVwWxXyYzZ]")
 WORD = re.compile(r"[^\W\d_]{2,}")
 
 
-# Thai, Lao, Myanmar, Khmer: the scripts has_word's fallback applies to.
-UNSPACED = ((0x0E00, 0x0EFF), (0x1000, 0x109F), (0x1780, 0x17FF), (0x19E0, 0x19FF))
+# Khmer blocks: the lines has_word's fallback applies to.
+UNSPACED = ((0x1780, 0x17FF), (0x19E0, 0x19FF))
 
 
 def has_word(s: str) -> bool:

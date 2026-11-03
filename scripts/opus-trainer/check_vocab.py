@@ -38,8 +38,9 @@ import sentencepiece as spm
 
 SAMPLE = 2000
 MAX_PIECES_PER_CHAR = 1.5
-# Scripts that do not separate words with spaces: Thai, Lao, Myanmar, Khmer.
-UNSPACED = ((0x0E00, 0x0EFF), (0x1000, 0x109F), (0x1780, 0x17FF), (0x19E0, 0x19FF))
+# Khmer blocks (no spaces between words). Add Thai/Lao/Burmese with a measured
+# MAX_PIECES_PER_CHAR when one of those pairs is built.
+UNSPACED = ((0x1780, 0x17FF), (0x19E0, 0x19FF))
 
 
 def is_unspaced(lines: list[str]) -> bool:
