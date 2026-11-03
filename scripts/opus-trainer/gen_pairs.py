@@ -35,7 +35,7 @@ import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from gen_sft import call_codex, strip_fences
+from gen_sft import BACKENDS, strip_fences
 from pair_spec import (
     ColumnOrder,
     GateReason,
@@ -50,6 +50,14 @@ from pair_spec import (
     parse_rows,
     sha,
 )
+
+# Both backends drive the vendor's own CLI (`codex exec`, `claude -p`) under the
+# operator's subscription login, never a raw API key: a contributor can lend their
+# plan's quota to a run without handing over credentials, and the run costs plan
+# usage rather than per-token API billing. Pick the model to match: a Luna id for
+# codex, an alias such as `sonnet` for claude.
+BACKEND_HELP = ("CLI harness that runs the model: codex (`codex exec`, ChatGPT login) "
+                "or claude (`claude -p`, Claude login)")
 
 JUDGE_DEFECTS = ("none", "mistranslation", "sense_flip", "unnatural", "gloss",
                  "number", "script", "english_leak", "wrong_register", "truncated")
@@ -79,12 +87,12 @@ def load_have(jobs_dir: pathlib.Path, spec: Spec) -> dict[str, list[str]]:
 
 
 def run_job(job: Job, spec: Spec, model: str, effort: str,
-            jobs_dir: pathlib.Path) -> int:
+            jobs_dir: pathlib.Path, backend: str = "codex") -> int:
     path = jobs_dir / f"{job.key}.json"
     last = ""
     for attempt in (0, 1):
         prompt = job.prompt if attempt == 0 else job.prompt + "\n\nReturn a bare JSON array only."
-        resp = call_codex(model, spec.system, prompt, effort)
+        resp = BACKENDS[backend](model, spec.system, prompt, effort)
         try:
             rows, malformed = parse_rows(json.loads(strip_fences(resp["result"])), spec)
         except (json.JSONDecodeError, ValueError) as e:
@@ -101,7 +109,7 @@ def run_job(job: Job, spec: Spec, model: str, effort: str,
             "job": {"key": job.key, "register": job.register, "category": job.category,
                     "form": job.form, "band": job.band, "n": job.n,
                     "numbers": str(job.numbers)},
-            "gen": model, "effort": effort,
+            "gen": model, "effort": effort, "backend": backend,
             "prompt_version": spec.prompt_version, "spec_sha": spec.sha,
             "malformed": malformed,
             "rows": [{"en": r.en, spec.code: r.target} for r in rows],
@@ -144,7 +152,8 @@ def cmd_gen(a: argparse.Namespace) -> None:
 
     ok = fail = got = 0
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
-        futs = {pool.submit(run_job, j, spec, a.model, a.effort, jobs_dir): j for j in todo}
+        futs = {pool.submit(run_job, j, spec, a.model, a.effort, jobs_dir, a.backend): j
+                for j in todo}
         for f in as_completed(futs):
             job = futs[f]
             try:
@@ -336,12 +345,13 @@ per input item, same order, same count. No prose, no code fences.
 """
 
 
-def judge_batch(items: list[dict], spec: Spec, model: str, effort: str) -> list[dict]:
+def judge_batch(items: list[dict], spec: Spec, model: str, effort: str,
+                backend: str = "codex") -> list[dict]:
     lines = [JUDGE_INSTRUCTIONS.format(language=spec.language), "",
              f"Judge these {len(items)} pairs.", ""]
     for n, it in enumerate(items):
         lines += [f"--- item {n} ---", f"en: {it['en']}", f"{spec.code}: {it[spec.code]}"]
-    resp = call_codex(model, JUDGE_SYSTEM, "\n".join(lines), effort)
+    resp = BACKENDS[backend](model, JUDGE_SYSTEM, "\n".join(lines), effort)
     out = json.loads(strip_fences(resp["result"]))
     if not isinstance(out, list) or len(out) != len(items):
         raise ValueError(f"got {len(out) if isinstance(out, list) else type(out)} verdicts, "
@@ -374,7 +384,7 @@ def judge(kept: list[dict], spec: Spec, a: argparse.Namespace) -> None:
             return off, "cached"
         for attempt in (1, 2, 3):
             try:
-                got = judge_batch(items, spec, a.model, a.effort)
+                got = judge_batch(items, spec, a.model, a.effort, a.backend)
                 f.write_text(json.dumps(got, ensure_ascii=False), encoding="utf-8")
                 return off, "ok"
             except Exception as e:
@@ -420,6 +430,7 @@ def main() -> None:
     g.add_argument("--out", required=True, type=pathlib.Path)
     g.add_argument("--model", default="gpt-5.6-luna")
     g.add_argument("--effort", default="low")
+    g.add_argument("--backend", choices=sorted(BACKENDS), default="codex", help=BACKEND_HELP)
     g.add_argument("--workers", type=int, default=4)
     g.add_argument("--rounds", type=int, default=1,
                    help="how many times each cell is asked; a later round names "
@@ -454,6 +465,7 @@ def main() -> None:
     b.add_argument("--judge-workers", type=int, default=4)
     b.add_argument("--model", default="gpt-5.6-luna")
     b.add_argument("--effort", default="low")
+    b.add_argument("--backend", choices=sorted(BACKENDS), default="codex", help=BACKEND_HELP)
     b.set_defaults(func=cmd_build)
 
     a = ap.parse_args()

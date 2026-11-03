@@ -20,6 +20,12 @@ Checks, per side of the pool:
     explodes while unk stays 0 and roundtrip still passes. Measured on the en-ug
     build: 1.36 (en) / 1.63 (ug) with its own vocab, vs 8.62 for ug scored
     against the en-sw vocab — a 5x separation, so the 6.0 default is a wide gate.
+    A side written WITHOUT spaces between words (Khmer, Thai, Lao, Burmese) has
+    no usable word count -- `split()` returns phrases -- so it is scored in
+    pieces per CHARACTER instead. Byte fallback on those scripts costs about 3
+    pieces per character (3 UTF-8 bytes each), against well under 1 for a vocab
+    that learned the script; MAX_PIECES_PER_CHAR sits between the two and is a
+    first guess until a real Khmer vocab has been measured.
 
 Usage: check_vocab.py VOCAB_SPM POOL_TSV [EXPECT_PIECES=32000] [MAX_FERTILITY=6.0]
 """
@@ -31,6 +37,15 @@ import sys
 import sentencepiece as spm
 
 SAMPLE = 2000
+MAX_PIECES_PER_CHAR = 1.5
+# Scripts that do not separate words with spaces: Thai, Lao, Myanmar, Khmer.
+UNSPACED = ((0x0E00, 0x0EFF), (0x1000, 0x109F), (0x1780, 0x17FF), (0x19E0, 0x19FF))
+
+
+def is_unspaced(lines: list[str]) -> bool:
+    letters = [c for s in lines for c in s if c.isalpha()]
+    hits = sum(1 for c in letters if any(lo <= ord(c) <= hi for lo, hi in UNSPACED))
+    return bool(letters) and hits / len(letters) > 0.5
 # NMT_NFKC rewrites a few lines legitimately; anything past this is a real defect.
 MAX_ROUNDTRIP_FAIL = 0.01
 
@@ -46,9 +61,19 @@ def side_report(sp: spm.SentencePieceProcessor, lines: list[str], label: str, ma
         pieces += len(ids)
         words += len(s.split())
         bad_roundtrip += sp.decode(ids) != s
-    fert = pieces / max(words, 1)
-    print(f"  {label}: {len(lines)} lines, {fert:.2f} pieces/word, {unks} unk, {bad_roundtrip} roundtrip fails")
     errs = []
+    if is_unspaced(lines):
+        chars = sum(len("".join(s.split())) for s in lines)
+        per_char = pieces / max(chars, 1)
+        print(f"  {label}: {len(lines)} lines, unspaced script, {per_char:.2f} pieces/char, "
+              f"{unks} unk, {bad_roundtrip} roundtrip fails")
+        if per_char > MAX_PIECES_PER_CHAR:
+            errs.append(f"{label}: {per_char:.2f} pieces/char > {MAX_PIECES_PER_CHAR} — the vocab likely "
+                        "never learned this side's script and is byte-falling-back through it")
+        fert = 0.0
+    else:
+        fert = pieces / max(words, 1)
+        print(f"  {label}: {len(lines)} lines, {fert:.2f} pieces/word, {unks} unk, {bad_roundtrip} roundtrip fails")
     if unks:
         errs.append(f"{label}: {unks} <unk> pieces — byte_fallback should make this impossible")
     if bad_roundtrip / len(lines) > MAX_ROUNDTRIP_FAIL:
@@ -64,11 +89,17 @@ def side_report(sp: spm.SentencePieceProcessor, lines: list[str], label: str, ma
     return errs
 
 
-def digit_split_report(sp: spm.SentencePieceProcessor) -> list[str]:
+def digit_split_report(sp: spm.SentencePieceProcessor, khmer: bool = False) -> list[str]:
     # A figure must segment into one piece per digit (plus the word marker), or
     # the decoder has to guess a segmentation when copying it and drops pieces on
     # runs longer than the ones it saw most (ka_findings.md §32-§33).
     probes = ["2387", "1201000", "Error 404", "12,50", "01012034567"]
+    if khmer:
+        # split_digits covers ASCII only; prep_data forces Khmer digits to single
+        # pieces, and these probes check that it did. Only for a Khmer vocab:
+        # on any other vocab a Khmer digit byte-falls-back to <0xE1>-style
+        # pieces, which this count would misread as multi-digit.
+        probes += ["១២៥០០", "តម្លៃ ២៣៨៧ ៛"]
     bad = []
     for text in probes:
         pieces = sp.encode(text, out_type=str)
@@ -107,7 +138,7 @@ def main() -> None:
                 break
     errs += side_report(sp, src, "src", max_fert)
     errs += side_report(sp, tgt, "tgt", max_fert)
-    errs += digit_split_report(sp)
+    errs += digit_split_report(sp, khmer=any(0x1780 <= ord(c) <= 0x17FF for s in src + tgt for c in s))
 
     if errs:
         for e in errs:

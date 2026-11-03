@@ -170,6 +170,12 @@ class Spec:
     forms: Mapping[str, Form]
     registers: tuple[RegisterSpec, ...]
     sha: str
+    # For a target script written without spaces between words (Khmer, Thai,
+    # Lao, Burmese), `split()` counts phrases, not words, and the length-ratio
+    # gate rejects most real pairs. When set, the target's word count is its
+    # non-space character count divided by this, so the gate keeps its meaning
+    # ("one side is a stub") without a segmenter in the generator.
+    target_chars_per_word: float | None = None
 
 
 @dataclass(frozen=True)
@@ -272,6 +278,8 @@ def parse_spec(raw: Mapping[str, object], sha: str) -> Spec:
             forms=forms,
             registers=registers,
             sha=sha,
+            target_chars_per_word=(float(gates["target_chars_per_word"])
+                                   if gates.get("target_chars_per_word") else None),
         )
     except (KeyError, TypeError, AttributeError) as e:
         raise SpecError(f"malformed spec: {e}") from e
@@ -519,12 +527,22 @@ def _words_for(value: int) -> set[str]:
     return out
 
 
+KHMER_DIGITS = str.maketrans("០១២៣៤៥៦៧៨៩", "0123456789")
+
+
+def ascii_digits(s: str) -> str:
+    """Khmer digits ០-៩ as ASCII. `\\d` already matches them, so without this a
+    sign printed with Khmer digits and an English side with ASCII ones compared as
+    different figures. Khmer only, so the Georgian gates behave exactly as before."""
+    return s.translate(KHMER_DIGITS)
+
+
 def _digits_of(tok: str) -> str:
-    return "".join(DIGITS.findall(tok))
+    return ascii_digits("".join(DIGITS.findall(tok)))
 
 
 def _parts(tok: str) -> list[str]:
-    return [p for p in re.split(r"[.,  ]", tok) if p]
+    return [ascii_digits(p) for p in re.split(r"[.,  ]", tok) if p]
 
 
 def _matches(tok: str, other_digits: set[str], other_parts: set[str],
@@ -604,6 +622,9 @@ def gate(spec: Spec, row: PairRow, band: Band, numbers: NumberPolicy) -> GateRea
     # which is the whole band this set exists to buy. What the gate is actually
     # looking for is one side truncated to a stub, and that shows in word counts.
     en_words, target_words = len(en.split()), len(target.split())
+    if spec.target_chars_per_word:
+        letters = len("".join(target.split()))
+        target_words = max(1, round(letters / spec.target_chars_per_word))
     lo = spec.word_ratio[0] * en_words - spec.word_ratio_slack[0]
     hi = spec.word_ratio[1] * en_words + spec.word_ratio_slack[1]
     if not lo <= target_words <= hi:

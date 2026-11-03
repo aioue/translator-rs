@@ -19,6 +19,11 @@ competent translator would produce correct English from the line. The defect typ
 is recorded second, for describing what is wrong rather than deciding it.
 
     judge_mono.py --src sample.jsonl --out labels/mono --batch 20 --workers 4
+
+The prompt was written for Georgian. `--language`/`--field` reuse it for another
+source language by substituting the name (`--language Khmer --field km`); the
+defaults reproduce the Georgian run byte for byte, including the `not_georgian`
+defect label.
 """
 
 import argparse
@@ -27,7 +32,7 @@ import pathlib
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from gen_sft import call_codex, strip_fences
+from gen_sft import BACKENDS, strip_fences
 
 DEFECTS = ("none", "typo", "awkward", "shattered", "garbled", "boilerplate",
            "not_georgian", "truncated")
@@ -81,16 +86,28 @@ One object per input item, same order, same count. No prose, no code fences.
 """
 
 
-def build_prompt(items: list[dict]) -> str:
-    lines = [INSTRUCTIONS, "", f"Judge these {len(items)} items.", ""]
+def localise(text: str, language: str) -> str:
+    """The Georgian prompt with another language named in it."""
+    return (text.replace("not_georgian", f"not_{language.lower()}")
+                .replace("Georgian", language))
+
+
+def defects_for(language: str) -> tuple[str, ...]:
+    return tuple(f"not_{language.lower()}" if d == "not_georgian" else d for d in DEFECTS)
+
+
+def build_prompt(items: list[dict], language: str = "Georgian", field: str = "ka") -> str:
+    lines = [localise(INSTRUCTIONS, language), "", f"Judge these {len(items)} items.", ""]
     for n, it in enumerate(items):
         lines.append(f"--- item {n} ---")
-        lines.append(f"ka: {it['ka']}")
+        lines.append(f"{field}: {it[field]}")
     return "\n".join(lines)
 
 
-def judge_batch(items: list[dict], model: str, effort: str) -> list[dict]:
-    resp = call_codex(model, SYSTEM, build_prompt(items), effort)
+def judge_batch(items: list[dict], model: str, effort: str, backend: str = "codex",
+                language: str = "Georgian", field: str = "ka") -> list[dict]:
+    resp = BACKENDS[backend](model, localise(SYSTEM, language),
+                             build_prompt(items, language, field), effort)
     out = json.loads(strip_fences(resp["result"]))
     if not isinstance(out, list) or len(out) != len(items):
         raise ValueError(f"got {len(out) if isinstance(out, list) else type(out)} verdicts, want {len(items)}")
@@ -99,20 +116,25 @@ def judge_batch(items: list[dict], model: str, effort: str) -> list[dict]:
     for o, it in zip(out, items):
         if o.get("keep") not in ("yes", "no"):
             raise ValueError(f"bad keep {o.get('keep')!r}")
-        if o.get("defect") not in DEFECTS:
+        if o.get("defect") not in defects_for(language):
             raise ValueError(f"bad defect {o.get('defect')!r}")
-        o["ka"], o["id"] = it["ka"], it.get("id")
+        o[field], o["id"] = it[field], it.get("id")
     return out
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--src", required=True, type=pathlib.Path, help="jsonl with a `ka` field")
+    ap.add_argument("--src", required=True, type=pathlib.Path, help="jsonl with a --field field")
     ap.add_argument("--out", required=True, type=pathlib.Path)
     ap.add_argument("--batch", type=int, default=20)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--model", default="gpt-5.6-luna")
     ap.add_argument("--effort", default="low")
+    # Vendor CLI under the operator's subscription login, never a raw API key
+    # (see gen_pairs.py BACKEND_HELP).
+    ap.add_argument("--backend", choices=sorted(BACKENDS), default="codex")
+    ap.add_argument("--language", default="Georgian", help="language named in the prompt")
+    ap.add_argument("--field", default="ka", help="jsonl field holding the line")
     args = ap.parse_args()
 
     rows = [json.loads(l) for l in args.src.read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -131,7 +153,8 @@ def main() -> None:
                 pass
         for attempt in (1, 2, 3):
             try:
-                got = judge_batch(items, args.model, args.effort)
+                got = judge_batch(items, args.model, args.effort, args.backend,
+                                  args.language, args.field)
                 f.write_text(json.dumps(got, ensure_ascii=False), encoding="utf-8")
                 return off, "ok"
             except Exception as e:
