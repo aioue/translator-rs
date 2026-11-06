@@ -48,6 +48,9 @@ def response_text_errors(raw: str, spec_code: str) -> list[str]:
         km = item.get(spec_code)
         if not isinstance(km, str) or not KHMER.search(km):
             errs.append(f"row {i}: missing Khmer script in {spec_code!r}")
+        en = item.get("en")
+        if not isinstance(en, str) or not en.strip():
+            errs.append(f"row {i}: missing English text in 'en'")
     return errs
 
 

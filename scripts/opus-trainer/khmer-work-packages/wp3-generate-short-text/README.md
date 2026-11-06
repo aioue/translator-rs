@@ -4,9 +4,8 @@ Goal: more realistic short English-Khmer pairs. Real data for these is almost no
 it. We have about 38,500 rows and want more variety, in the registers with the fewest repeats (menus, notices, labels).
 
 There are 707 prompts ("cells", each a situation such as allergen labels or vaccination notices, a surface form and a length band),
-split into 29 batches of 25. The batches are not in this repository: download `khmer-wp3-prompt-batches.zip` from this Google Drive folder: https://drive.google.com/drive/folders/1TepAqJr712lQUq-N0VC_8YEIrNnUxdBL?usp=sharing
-(SHA-256 `8313020e480e4b66d4a903217ac4d8d5d78fc0c5dcafc26c571f776f98f7d94a`) and unzip it into this directory so that `batches/batch-01/manifest.json` exists. (The prompts contain lists of text already written, which we share separately.) Batches 1 to 13 are cells nobody has filled yet, batch 14 is a mix, and later batches repeat cells that an
-open-weights model already filled, so we get a second view of them. Start with `batch-01`: it doubles as a pilot, and we will check
+split into 29 batches: 25 prompts in batches 01 to 28 and 7 in batch 29. Every key is unique across batches, so fill the keys listed in each batch's `manifest.json` and nothing else. The batches are not in this repository: download `khmer-wp3-prompt-batches.zip` from this Google Drive folder: https://drive.google.com/drive/folders/1TepAqJr712lQUq-N0VC_8YEIrNnUxdBL?usp=sharing
+(SHA-256 `45a5c1efcadb7d64aec67b4521105d3922e84122b7d0762edd33685795fd7bba`) and unzip it into this directory so that `batches/batch-01/manifest.json` exists. (The prompts contain lists of text already written, which we share separately.) Start with `batch-01`: it doubles as a pilot, and we will check
 its output before asking you for more.
 
 ## Your job, per batch
@@ -18,7 +17,7 @@ its output before asking you for more.
 4. Write the model name and version you used, on one line, to `batches/batch-NN/responses/MODEL.txt`.
 5. Check it from `scripts/opus-trainer/`:
    `python3 check_handoff.py --batch-dir khmer-work-packages/wp3-generate-short-text/batches/batch-NN --code km`
-   (exit 0 means every response is fine; 1 means a bad file; 2 means a key is missing). Fix what it reports.
+   Run it from `scripts/opus-trainer/`. Exit 0 means every response file is a JSON array of objects whose `km` contains Khmer and whose `en` is non-empty, with no markdown fences. It does not check the row count, the word band, distinctness or `MODEL.txt`, so follow the prompt yourself. Exit 1: a bad or unexpected file (the output lists `missing_keys` too). Exit 2: only keys are missing. Fix what it reports.
 
 The full instructions an agent should follow are in [`../../D-templates/DELEGATE-INSTRUCTIONS.md`](../../D-templates/DELEGATE-INSTRUCTIONS.md).
 Do not run `gen_pairs.py gen`, call a model API from a script, or use the web: just answer the prompts.

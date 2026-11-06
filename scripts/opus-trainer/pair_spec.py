@@ -331,7 +331,7 @@ RULES = """Rules:
   a different length, the polite and the plain version, the wordy and the terse.
 - No duplicates, no numbering, no commentary, no transliteration, no romanization.
 - No {language} letters in the English side. Units and currency there are
-  written in English (12.50 GEL, 250 ml, 30 minutes), never in {language}.
+  written in English (12.50 USD, 250 ml, 30 minutes), never in {language}.
 - No English or Latin-script words in the {code} side except brand names, model
   codes and the units that {language} itself prints in Latin (Wi-Fi, PIN, SIM,
   kg, ml, USB).

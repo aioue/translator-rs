@@ -3,7 +3,7 @@
 ---
 
 You are a blind rater of English-Khmer translation pairs. Read the file `sheets/sheet-NNN.tsv`
-(tab separated: id, en, km; 400 rows; short phrases for signs, labels, notices and app screens).
+(tab separated: id, en, km; 400 rows, 384 on sheet 055; short phrases for signs, labels, notices and app screens).
 
 For EVERY row give a score:
 - 3 = the Khmer is a correct, natural translation of the English.
@@ -18,5 +18,5 @@ Names and brands left in Latin letters are fine when the English has them. Wrong
 
 Write ONLY one file, `ratings/ratings-NNN.tsv`, with the header line `id<TAB>score<TAB>flag<TAB>note` and exactly one line per input id,
 in input order, each note under 15 words. Then run
-`python3 check_ratings.py sheets/sheet-NNN.tsv ratings/ratings-NNN.tsv` and fix anything it reports.
+`python3 check_ratings.py sheets/sheet-NNN.tsv ratings/ratings-NNN.tsv` (run from the wp2-judge-rows directory) and fix anything it reports.
 Report how many rows scored 1, 2 and 3. Do not edit any other file and do not use the network.

@@ -7,8 +7,11 @@ FLAGS = {"", "STRAY_LATIN", "MISALIGNED", "WRONG_TERM", "UNTRANSLATED", "OTHER"}
 
 
 def rows(path):
-    with open(path, encoding="utf-8", newline="") as f:
-        return list(csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE))
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            return list(csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE))
+    except OSError as e:
+        sys.exit(f"PROBLEM: cannot read {path}: {e}")
 
 
 def main(sheet_path, ratings_path):
@@ -21,7 +24,8 @@ def main(sheet_path, ratings_path):
     if got != want:
         missing, extra = set(want) - set(got), set(got) - set(want)
         problems.append(f"ids differ from the sheet: {len(want)} expected, {len(got)} found, "
-                        f"{len(missing)} missing, {len(extra)} unexpected, order {'ok' if sorted(got) == sorted(want) else 'n/a'}")
+                        f"{len(missing)} missing, {len(extra)} unexpected, "
+                        f"{'same ids in the wrong order' if sorted(got) == sorted(want) else 'order not comparable'}")
         dup = [i for i, c in collections.Counter(got).items() if c > 1]
         if dup:
             problems.append(f"duplicate ids: {dup[:5]}")
@@ -35,9 +39,11 @@ def main(sheet_path, ratings_path):
             scores[r[1]] += 1
         if r[2] not in FLAGS:
             problems.append(f"line {n}: unknown flag {r[2]!r}")
+        if len(r[3].split()) > 15:
+            problems.append(f"line {n}: note has {len(r[3].split())} words, limit is 15")
     for p in problems[:30]:
         print("PROBLEM:", p)
-    print(f"rows {len(ratings) - 1} of {len(want)}; scores 1:{scores['1']} 2:{scores['2']} 3:{scores['3']}")
+    print(f"rows {max(len(ratings) - 1, 0)} of {len(want)}; scores 1:{scores['1']} 2:{scores['2']} 3:{scores['3']}")
     return 1 if problems else 0
 
 

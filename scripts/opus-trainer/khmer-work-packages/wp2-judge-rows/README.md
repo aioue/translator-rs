@@ -1,7 +1,7 @@
 # WP2: rate 21,984 generated English-Khmer pairs
 
 Goal: give every short generated pair a quality score, so wrong ones can be set aside before training.
-The 55 sheets hold 21,984 pairs (400 per sheet, the last has 384): signage, notices and app strings,
+The 55 sheets hold 21,984 pairs (400 per sheet, 384 on sheet 055): signage, notices and app strings,
 mixed in random order. Each pair is an English phrase and its Khmer translation, machine-generated.
 
 The sheets are not in this repository. Download `khmer-wp2-judging-sheets.zip` from this Google Drive folder: https://drive.google.com/drive/folders/1TepAqJr712lQUq-N0VC_8YEIrNnUxdBL?usp=sharing
@@ -16,7 +16,7 @@ The sheets are not in this repository. Download `khmer-wp2-judging-sheets.zip` f
    - **1**: wrong, garbled, unrelated, untranslated, or has stray Latin letters or markup stuck into the Khmer that the English does not call for.
 3. Add a flag when one applies, otherwise leave it empty: `STRAY_LATIN`, `MISALIGNED`, `WRONG_TERM`, `UNTRANSLATED`, `OTHER`.
 4. Write `ratings/ratings-NNN.tsv` with the header `id<TAB>score<TAB>flag<TAB>note` and one line per input id, in the same order. Keep each note under 15 words.
-5. Check it: `python3 check_ratings.py sheets/sheet-NNN.tsv ratings/ratings-NNN.tsv`. Fix anything it reports.
+5. Check it, from this directory (`wp2-judge-rows/`): `python3 check_ratings.py sheets/sheet-NNN.tsv ratings/ratings-NNN.tsv`. Fix anything it reports. It also flags notes longer than 15 words.
 
 The prompt to give an AI rater is in [PROMPT.md](PROMPT.md). You can do any number of sheets; start with `sheet-001`.
 
@@ -34,7 +34,7 @@ The prompt to give an AI rater is in [PROMPT.md](PROMPT.md). You can do any numb
 Use the strongest model you have, for example a current Claude Opus or Sonnet, a GPT-5-class model, or a Gemini Pro-class model.
 In our own checks a small, fast Claude Haiku-class model and a Gemini Flash-class model were both usable judges, so a smaller model
 is fine too. None of these judges is a native Khmer speaker. Anything you can kindly provide is welcome: please write the model and
-version you used at the top of the message you send back.
+version you used in the message you send back, not inside the TSV (a preamble line fails the header check).
 
 ## Returning results
 
