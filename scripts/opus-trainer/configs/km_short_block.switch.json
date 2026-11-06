@@ -1,0 +1,19 @@
+{
+  "bulk_generation_allowed": false,
+  "max_rounds": 2,
+  "confirm": {
+    "rounds": 1,
+    "per_cell": 8,
+    "registers": "menus,labels",
+    "forms": "numeric,label",
+    "limit": 40,
+    "out": "data/gen_pairs/km-confirm"
+  },
+  "bulk": {"rounds": 2, "per_cell": 0, "out": "data/gen_pairs/km-v1"},
+  "exclude": [
+    "PROBES_EN_TSV",
+    "PROBES_KM_TSV",
+    "EVAL_HASH_DIR",
+    "EVAL_TEXT_DIR"
+  ]
+}

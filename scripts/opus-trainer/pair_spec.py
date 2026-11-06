@@ -648,3 +648,59 @@ def norm(s: str) -> str:
 def sha(s: str) -> str:
     """Digest as `data/eval_exclude.sha256` stores it: raw text, stripped only."""
     return hashlib.sha256(s.strip().encode("utf-8")).hexdigest()
+
+
+_EN_TOK = re.compile(r"[a-z0-9]+")
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _char_bigrams(s: str) -> set[str]:
+    s = s.replace(" ", "")
+    if len(s) < 2:
+        return {s} if s else set()
+    return {s[i : i + 2] for i in range(len(s) - 1)}
+
+
+def _english_near_hit(en_norm: str, probe_norm: str) -> bool:
+    if en_norm == probe_norm:
+        return True
+    a, b = en_norm, probe_norm
+    if (a in b or b in a) and min(len(a), len(b)) >= 12:
+        return True
+    return _jaccard(set(_EN_TOK.findall(en_norm)), set(_EN_TOK.findall(probe_norm))) >= 0.8
+
+
+def probe_hit(
+    en: str,
+    target: str,
+    probes_en: Sequence[str],
+    probes_target: Sequence[str],
+) -> bool:
+    """Near-duplicate of a held-out probe line (build-time exclusion)."""
+    en_norm, target_norm = norm(en), norm(target)
+    en_sha, target_sha = sha(en), sha(target)
+
+    for probe in probes_en:
+        pn = norm(probe)
+        if en_norm == pn or en_sha == sha(probe):
+            return True
+        if _english_near_hit(en_norm, pn):
+            return True
+
+    for probe in probes_target:
+        pn = norm(probe)
+        if target_norm == pn or target_sha == sha(probe):
+            return True
+        stripped = pn.replace(" ", "")
+        if len(stripped) >= 6:
+            if _jaccard(_char_bigrams(target_norm.replace(" ", "")),
+                        _char_bigrams(stripped)) >= 0.8:
+                return True
+    return False

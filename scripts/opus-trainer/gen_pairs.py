@@ -48,6 +48,7 @@ from pair_spec import (
     load_spec,
     norm,
     parse_rows,
+    probe_hit,
     sha,
 )
 
@@ -119,8 +120,31 @@ def run_job(job: Job, spec: Spec, model: str, effort: str,
     raise RuntimeError(f"batch failed after retry ({last})")
 
 
+def km_switch_path(spec_path: pathlib.Path) -> pathlib.Path:
+    return spec_path.parent / "km_short_block.switch.json"
+
+
+def enforce_km_gen_guard(spec: Spec, spec_path: pathlib.Path, rounds: int) -> None:
+    if spec.code != "km":
+        return
+    switch_path = km_switch_path(spec_path)
+    if not switch_path.is_file():
+        print("km generation blocked: missing km_short_block.switch.json", flush=True)
+        sys.exit(2)
+    switch = json.loads(switch_path.read_text(encoding="utf-8"))
+    if switch.get("bulk_generation_allowed") is not True:
+        print("km generation blocked: bulk_generation_allowed is not true", flush=True)
+        sys.exit(2)
+    max_rounds = int(switch.get("max_rounds", 2))
+    if rounds > max_rounds:
+        print(f"km generation blocked: --rounds {rounds} exceeds max_rounds {max_rounds}",
+              flush=True)
+        sys.exit(2)
+
+
 def cmd_gen(a: argparse.Namespace) -> None:
     spec = load_spec(a.spec)
+    enforce_km_gen_guard(spec, a.spec, a.rounds)
     jobs_dir = a.out / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -210,6 +234,56 @@ def load_exclusions(paths: list[pathlib.Path]) -> tuple[set[str], set[str]]:
     return digests, text
 
 
+def load_near_probe_lists(paths: list[pathlib.Path]) -> tuple[list[str], list[str]]:
+    """English and Khmer probe lines from Khmer probe TSVs passed to --exclude."""
+    probes_en: list[str] = []
+    probes_target: list[str] = []
+    for path in paths:
+        if path.suffix == ".sha256" or not path.is_file():
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if not lines:
+            continue
+        header = lines[0].split("\t")
+        if "en" in header and "km_draft" in header:
+            ei, ki = header.index("en"), header.index("km_draft")
+            for line in lines[1:]:
+                cols = line.split("\t")
+                if len(cols) <= max(ei, ki):
+                    continue
+                if cols[ei].strip():
+                    probes_en.append(cols[ei])
+                if cols[ki].strip():
+                    probes_target.append(cols[ki])
+        elif "km_source" in header and "en_reference" in header:
+            ki, ei = header.index("km_source"), header.index("en_reference")
+            for line in lines[1:]:
+                cols = line.split("\t")
+                if len(cols) <= max(ei, ki):
+                    continue
+                if cols[ei].strip():
+                    probes_en.append(cols[ei])
+                if cols[ki].strip():
+                    probes_target.append(cols[ki])
+    return probes_en, probes_target
+
+
+def select_judge_rows(rows: list[dict], seed: int) -> list[dict]:
+    """km-v1 judge policy: all menus, prohibition and numeric; 10% of the rest."""
+    rng = random.Random(seed)
+    always: list[dict] = []
+    pool: list[dict] = []
+    for row in rows:
+        if (row.get("register") == "menus"
+                or row.get("form") in ("prohibition", "numeric")):
+            always.append(row)
+        else:
+            pool.append(row)
+    n = round(len(pool) * 0.1)
+    picked = rng.sample(pool, min(n, len(pool))) if pool and n else []
+    return always + picked
+
+
 def cmd_build(a: argparse.Namespace) -> None:
     spec = load_spec(a.spec)
     if a.tsv_order not in (f"en,{spec.code}", f"{spec.code},en"):
@@ -219,11 +293,16 @@ def cmd_build(a: argparse.Namespace) -> None:
 
     known = load_known(a.known)
     ex_digests, ex_text = load_exclusions(a.exclude)
+    probes_en, probes_target = load_near_probe_lists(a.exclude)
     print(f"{len(known)} known normalised strings, "
           f"{len(ex_digests)} eval digests + {len(ex_text)} eval lines held out",
           flush=True)
+    if probes_en or probes_target:
+        print(f"{len(probes_en)} English + {len(probes_target)} Khmer near-probe lines",
+              flush=True)
 
     stats: collections.Counter = collections.Counter()
+    near_probe_rows: list[str] = []
     # Kept, raw and duplicate counts per register: the duplicate rate is the
     # signal for whether another round is still buying rows in that register or
     # only re-asking for what it already holds.
@@ -250,6 +329,10 @@ def cmd_build(a: argparse.Namespace) -> None:
             if any(sha(c) in ex_digests or k in ex_text
                    for c, k in ((row.en, keys[0]), (row.target, keys[1]))):
                 stats["eval_excluded"] += 1
+                continue
+            if probe_hit(row.en, row.target, probes_en, probes_target):
+                stats["near_probe"] += 1
+                near_probe_rows.append(f"{row.en}\t{row.target}")
                 continue
             if any(k in known for k in keys):
                 stats["dup_known"] += 1
@@ -289,6 +372,12 @@ def cmd_build(a: argparse.Namespace) -> None:
         if stats[f"gate:{reason}"]:
             print(f"  gate {reason:16s} -{stats[f'gate:{reason}']:>6}")
     print(f"  {'eval excluded':21s} -{stats['eval_excluded']:>6}")
+    if stats["near_probe"]:
+        print(f"  {'near probe':21s} -{stats['near_probe']:>6}")
+        for line in near_probe_rows[:20]:
+            print(f"    near_probe: {line[:120]}")
+        if len(near_probe_rows) > 20:
+            print(f"    ... and {len(near_probe_rows) - 20} more near_probe rows")
     print(f"  {'dup vs known':21s} -{stats['dup_known']:>6}")
     print(f"  {'dup within run':21s} -{stats['dup_run']:>6}")
     print(f"  {'KEPT':21s}  {len(kept):>6}  "
@@ -300,7 +389,7 @@ def cmd_build(a: argparse.Namespace) -> None:
               f"{100 * dup / raw_register[reg]:>5.1f}%")
     print(f"\n-> {jsonl}\n-> {tsv}")
 
-    if a.judge_sample > 0 and kept:
+    if kept and (a.judge_sample > 0 or a.judge_policy == "km-v1"):
         judge(kept, spec, a)
 
 
@@ -370,7 +459,10 @@ def judge_batch(items: list[dict], spec: Spec, model: str, effort: str,
 
 def judge(kept: list[dict], spec: Spec, a: argparse.Namespace) -> None:
     rng = random.Random(a.judge_seed)
-    sample = rng.sample(kept, max(1, round(len(kept) * a.judge_sample)))
+    if a.judge_policy == "km-v1":
+        sample = select_judge_rows(kept, a.judge_seed)
+    else:
+        sample = rng.sample(kept, max(1, round(len(kept) * a.judge_sample)))
     batches = [(i, sample[i:i + a.judge_batch]) for i in range(0, len(sample), a.judge_batch)]
     bdir = a.out / "judge" / "batches"
     bdir.mkdir(parents=True, exist_ok=True)
@@ -460,6 +552,9 @@ def main() -> None:
     b.add_argument("--tsv-order", default="en,ka", help="en,<code> or <code>,en")
     b.add_argument("--judge-sample", type=float, default=0.0,
                    help="fraction of kept rows to send through the bilingual judge")
+    b.add_argument("--judge-policy", default="",
+                   help="km-v1: judge all menus, prohibition and numeric rows, "
+                        "plus 10%% of the rest (ignores --judge-sample)")
     b.add_argument("--judge-seed", type=int, default=42)
     b.add_argument("--judge-batch", type=int, default=20)
     b.add_argument("--judge-workers", type=int, default=4)
