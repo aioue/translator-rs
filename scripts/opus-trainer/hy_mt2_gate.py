@@ -80,12 +80,16 @@ def main() -> None:
             for s in src
         ]
         outs = llm.generate(prompts, sp)
+        truncated = sum(1 for o in outs if o.outputs[0].finish_reason == "length")
         hyps = [o.outputs[0].text.strip() for o in outs]
         if args.out_dir is not None:
             save_pair(args.out_dir, src_code, tgt_code, src, hyps, ref)
         chrf = sacrebleu.corpus_chrf(hyps, [ref], word_order=2)
         bleu = sacrebleu.corpus_bleu(hyps, [ref], tokenize="flores200")
-        print(f"{src_code}->{tgt_code}: chrF++ {chrf.score:.2f}  spBLEU {bleu.score:.2f}  (n={len(hyps)})")
+        print(
+            f"{src_code}->{tgt_code}: chrF++ {chrf.score:.2f}  spBLEU {bleu.score:.2f}  "
+            f"truncated {truncated}/{len(hyps)}  (n={len(hyps)})"
+        )
 
 
 if __name__ == "__main__":

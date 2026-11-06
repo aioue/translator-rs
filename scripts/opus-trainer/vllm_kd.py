@@ -12,9 +12,10 @@ is preserved, so gather can cat by shard index.
 The `if __name__ == "__main__"` guard is REQUIRED: vLLM's v1 engine uses spawn,
 which re-imports this module in each worker.
 
-    vllm_kd.py SRC OUT TARGET_LANGUAGE [LIMIT=0]
+    vllm_kd.py SRC OUT TARGET_LANGUAGE [LIMIT=0] [--max-tokens N] [--drop-truncated]
 """
 
+import argparse
 import os
 import sys
 import time
@@ -23,17 +24,26 @@ import time
 def main() -> None:
     from vllm import LLM, SamplingParams
 
-    src, out, tgt = sys.argv[1], sys.argv[2], sys.argv[3]
-    limit = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+    from vllm_truncation import print_truncation_summary, write_decode_outputs
+
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("src")
+    ap.add_argument("out")
+    ap.add_argument("tgt")
+    ap.add_argument("limit", nargs="?", type=int, default=0)
+    ap.add_argument("--max-tokens", type=int, default=512)
+    ap.add_argument("--drop-truncated", action="store_true")
+    args = ap.parse_args()
+
     model = os.environ["HY_MODEL"]
 
     # Hy-MT2's own English instruction template (matches hy_mt2_gate.py exactly).
     template = ("Translate the following text into {tgt}. Note that you should only "
                 "output the translated result without any additional explanation: {text}")
 
-    lines = [l for l in open(src, encoding="utf-8").read().splitlines() if l.strip()]
-    if limit:
-        lines = lines[:limit]
+    lines = [l for l in open(args.src, encoding="utf-8").read().splitlines() if l.strip()]
+    if args.limit:
+        lines = lines[: args.limit]
 
     # enforce_eager: skip torch.compile + cudagraph capture. That warmup is
     # ~10-20min per box with no compile cache and can hang, which for a one-pass
@@ -43,19 +53,22 @@ def main() -> None:
     tok = llm.get_tokenizer()
     prompts = [
         tok.apply_chat_template(
-            [{"role": "user", "content": template.format(tgt=tgt, text=s)}],
+            [{"role": "user", "content": template.format(tgt=args.tgt, text=s)}],
             add_generation_prompt=True, tokenize=False,
         )
         for s in lines
     ]
 
     t0 = time.time()
-    outs = llm.generate(prompts, SamplingParams(temperature=0.0, max_tokens=512))
+    outs = llm.generate(
+        prompts, SamplingParams(temperature=0.0, max_tokens=args.max_tokens)
+    )
     dt = time.time() - t0
 
-    with open(out, "w", encoding="utf-8") as f:
-        for o in outs:
-            f.write(o.outputs[0].text.strip().replace("\n", " ").replace("\t", " ") + "\n")
+    truncated, n = write_decode_outputs(
+        args.out, outs, drop_truncated=args.drop_truncated
+    )
+    print_truncation_summary(truncated, n)
     print(f"THROUGHPUT {len(lines)} lines in {dt:.1f}s = {len(lines)/dt:.1f} l/s",
           file=sys.stderr)
 
