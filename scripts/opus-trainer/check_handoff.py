@@ -48,6 +48,8 @@ def response_text_errors(raw: str, spec_code: str) -> list[str]:
         km = item.get(spec_code)
         if not isinstance(km, str) or not KHMER.search(km):
             errs.append(f"row {i}: missing Khmer script in {spec_code!r}")
+        elif "\u200b" in km:
+            errs.append(f"row {i}: zero-width space (U+200B) in {spec_code!r}; remove it")
         en = item.get("en")
         if not isinstance(en, str) or not en.strip():
             errs.append(f"row {i}: missing English text in 'en'")
@@ -59,7 +61,12 @@ def validate_response_file(path: pathlib.Path, spec_code: str,
     key = path.stem
     if key not in manifest_keys:
         return [f"key {key!r} not in manifest"], None
-    raw = path.read_text(encoding="utf-8")
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        return [f"not valid UTF-8: {e}"], None
+    if raw.startswith("\ufeff"):
+        return ["file starts with a byte-order mark; save it as plain UTF-8 without BOM"], None
     errs = response_text_errors(raw, spec_code)
     row_count: int | None = None
     try:
@@ -110,6 +117,8 @@ def main() -> None:
     ap.add_argument("--code", default="",
                     help="target language code column (overrides spec)")
     args = ap.parse_args()
+    if not args.batch_dir.is_dir():
+        sys.exit(f"batch directory not found: {args.batch_dir}")
     manifest = load_manifest(args.batch_dir)
     if args.code:
         code = args.code

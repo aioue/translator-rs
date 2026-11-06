@@ -15,6 +15,17 @@ Each can be done in a single Claude or ChatGPT session (or a few), by a person o
 
 Data for WP2 and WP3 (two zip files with checksums) is in this Google Drive folder: https://drive.google.com/drive/folders/1TepAqJr712lQUq-N0VC_8YEIrNnUxdBL?usp=sharing
 
+## Get the code
+
+```bash
+git clone https://github.com/aioue/translator-rs
+cd translator-rs
+git checkout km-prep-2026-11-05
+cd scripts/opus-trainer/khmer-work-packages
+```
+
+Unzip the WP2 and WP3 data into `wp2-judge-rows/` and `wp3-generate-short-text/` (each zip contains the `sheets/` or `batches/` folder). The READMEs say which commands to run from where.
+
 ## Ground rules
 
 - Nothing here needs a password, API key or account of ours. If something asks for one, stop and say so.

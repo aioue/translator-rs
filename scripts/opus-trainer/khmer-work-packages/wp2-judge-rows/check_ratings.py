@@ -8,10 +8,17 @@ FLAGS = {"", "STRAY_LATIN", "MISALIGNED", "WRONG_TERM", "UNTRANSLATED", "OTHER"}
 
 def rows(path):
     try:
-        with open(path, encoding="utf-8", newline="") as f:
-            return list(csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE))
+        raw = open(path, "rb").read()
     except OSError as e:
         sys.exit(f"PROBLEM: cannot read {path}: {e}")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        sys.exit(f"PROBLEM: {path} starts with a byte-order mark; save it as plain UTF-8 without BOM")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        sys.exit(f"PROBLEM: {path} is not valid UTF-8: {e}")
+    # blank lines (a stray trailing newline is common) are ignored
+    return [r for r in csv.reader(text.splitlines(), delimiter="\t", quoting=csv.QUOTE_NONE) if r]
 
 
 def main(sheet_path, ratings_path):

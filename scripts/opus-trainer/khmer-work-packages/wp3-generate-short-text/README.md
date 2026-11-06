@@ -5,7 +5,7 @@ it. We have about 38,500 rows and want more variety, in the registers with the f
 
 There are 707 prompts ("cells", each a situation such as allergen labels or vaccination notices, a surface form and a length band),
 split into 29 batches: 25 prompts in batches 01 to 28 and 7 in batch 29. Every key is unique across batches, so fill the keys listed in each batch's `manifest.json` and nothing else. The batches are not in this repository: download `khmer-wp3-prompt-batches.zip` from this Google Drive folder: https://drive.google.com/drive/folders/1TepAqJr712lQUq-N0VC_8YEIrNnUxdBL?usp=sharing
-(SHA-256 `45a5c1efcadb7d64aec67b4521105d3922e84122b7d0762edd33685795fd7bba`) and unzip it into this directory so that `batches/batch-01/manifest.json` exists. (The prompts contain lists of text already written, which we share separately.) Start with `batch-01`: it doubles as a pilot, and we will check
+(SHA-256 `45a5c1efcadb7d64aec67b4521105d3922e84122b7d0762edd33685795fd7bba`) and unzip it into this directory so that `batches/batch-01/manifest.json` exists. (Each prompt contains a list of text we already have, so you do not repeat it. Please do not republish the prompts.) Start with `batch-01`: it doubles as a pilot, and we will check
 its output before asking you for more.
 
 ## Your job, per batch

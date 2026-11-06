@@ -17,6 +17,6 @@ Rules: do not rewrite the Khmer. If you cannot tell, give 2 and write `unsure` i
 Names and brands left in Latin letters are fine when the English has them. Wrong safety wording (allergens, warnings, medicine, electrical) is a 1.
 
 Write ONLY one file, `ratings/ratings-NNN.tsv`, with the header line `id<TAB>score<TAB>flag<TAB>note` and exactly one line per input id,
-in input order, each note under 15 words. Then run
-`python3 check_ratings.py sheets/sheet-NNN.tsv ratings/ratings-NNN.tsv` (run from the wp2-judge-rows directory) and fix anything it reports.
+in input order, each note under 15 words. If you can run commands, run
+`python3 check_ratings.py sheets/sheet-NNN.tsv ratings/ratings-NNN.tsv` (run from the wp2-judge-rows directory) and fix anything it reports; if you cannot run it, say so.
 Report how many rows scored 1, 2 and 3. Do not edit any other file and do not use the network.
