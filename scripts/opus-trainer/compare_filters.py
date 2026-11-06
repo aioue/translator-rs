@@ -51,8 +51,10 @@ def main() -> None:
         lang = pair.split("-")[1]
         with zipfile.ZipFile(zp) as z:
             names = z.namelist()
-            S = z.read(next(n for n in names if n.endswith(".en"))).decode("utf-8", "replace").splitlines()
-            T = z.read(next(n for n in names if n.endswith("." + lang))).decode("utf-8", "replace").splitlines()
+            S = [l for l in z.read(next(n for n in names if n.endswith(".en"))).decode("utf-8", "replace").split("\n")]
+            S = S[:-1] if S and S[-1] == "" else S
+            T = [l for l in z.read(next(n for n in names if n.endswith("." + lang))).decode("utf-8", "replace").split("\n")]
+            T = T[:-1] if T and T[-1] == "" else T
         reg_b = breg.REGISTER.get(corpus, breg.Register.HUMAN)
         reg_n = nreg.REGISTER.get(corpus, nreg.Register.HUMAN)
         diff = 0
