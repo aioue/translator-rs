@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use crate::bergamot::{BergamotEngine, ModelPaths, TranslateCtx};
@@ -43,15 +44,15 @@ impl<'a> Translator<'a> {
         to_code: &LanguageCode,
         text: &str,
     ) -> Result<String, TranslatorError> {
-        let normalized = text.trim();
+        let normalized = prepare_source_text(from_code, text);
         if normalized.is_empty() {
             return Ok(String::new());
         }
         if from_code == to_code || normalized.parse::<f32>().is_ok() {
-            return Ok(normalized.to_string());
+            return Ok(normalized.into_owned());
         }
 
-        let merged = translate_lines_preserving(normalized, |inputs| {
+        let merged = translate_lines_preserving(&normalized, |inputs| {
             self.translate_texts(from_code, to_code, &inputs)
                 .map(|texts| texts.into_iter().map(plain_translation).collect())
         })?;
@@ -67,11 +68,11 @@ impl<'a> Translator<'a> {
         to_code: &LanguageCode,
         text: &str,
     ) -> Result<TranslationWithAlternatives, TranslatorError> {
-        let normalized = text.trim();
+        let normalized = prepare_source_text(from_code, text);
         if normalized.is_empty() || from_code == to_code {
             return Ok(TranslationWithAlternatives {
-                source_text: text.to_string(),
-                translated_text: normalized.to_string(),
+                source_text: km_engine_source_text(from_code, text, &normalized),
+                translated_text: normalized.into_owned(),
                 alternatives: Vec::new(),
             });
         }
@@ -88,7 +89,7 @@ impl<'a> Translator<'a> {
             ))
         })?;
         ensure_plan_loaded(self.engine, &plan).map_err(TranslatorError::translation)?;
-        let mut result = translate_lines_preserving(normalized, |inputs| {
+        let mut result = translate_lines_preserving(&normalized, |inputs| {
             match plan.steps.as_slice() {
                 [step] => self
                     .engine
@@ -109,8 +110,10 @@ impl<'a> Translator<'a> {
                 _ => Ok(inputs.into_iter().map(plain_translation).collect()),
             }
         })?;
-        // `source_text` stays the original input so a later steer re-derives it.
-        result.source_text = text.to_string();
+        // Khmer: store the text Bergamot saw (ZWSP stripped) so steer and char
+        // offsets stay consistent. Other languages: keep the original input
+        // (trim-only mismatch with the engine predates this change).
+        result.source_text = km_engine_source_text(from_code, text, &normalized);
         Ok(result)
     }
 
@@ -137,25 +140,30 @@ impl<'a> Translator<'a> {
             ))
         })?;
         ensure_plan_loaded(self.engine, &plan).map_err(TranslatorError::translation)?;
+        let prepared = prepare_source_text(from_code, source);
+        let engine_source = prepared.as_ref();
         match plan.steps.as_slice() {
-            [step] => self
-                .engine
-                .steer(source, forced_prefix, &step.cache_key)
-                .map_err(TranslatorError::translation),
+            [step] => {
+                let mut result = self
+                    .engine
+                    .steer(engine_source, forced_prefix, &step.cache_key)
+                    .map_err(TranslatorError::translation)?;
+                result.source_text = km_engine_source_text(from_code, source, &prepared);
+                Ok(result)
+            }
             // Pivot: re-derive the intermediate (nl->en), then force the target
-            // prefix on the final hop (en->es). Keep the original `source` so a
-            // follow-up steer routes the same way.
+            // prefix on the final hop (en->es). First hop uses prepared source.
             [first, second] => {
                 let intermediate = self
                     .engine
-                    .translate_multiple(&[source.to_string()], &first.cache_key)
+                    .translate_multiple(&[engine_source.to_string()], &first.cache_key)
                     .map_err(TranslatorError::translation)?;
                 let pivot = intermediate.into_iter().next().unwrap_or_default();
                 let mut result = self
                     .engine
                     .steer(&pivot, forced_prefix, &second.cache_key)
                     .map_err(TranslatorError::translation)?;
-                result.source_text = source.to_string();
+                result.source_text = km_engine_source_text(from_code, source, &prepared);
                 Ok(result)
             }
             _ => Err(TranslatorError::translation(
@@ -350,6 +358,46 @@ pub struct TranslationWithAlternatives {
     pub source_text: String,
     pub translated_text: String,
     pub alternatives: Vec<WordAlternatives>,
+}
+
+/// Training strips U+200B from Khmer (`prep_data.py`); SentencePiece maps a lone
+/// ZWSP to an extra space piece the student never saw. U+200C/U+200D are Khmer
+/// coeng/joiner context marks — do not strip them here.
+fn prepare_source_text<'a>(
+    from_code: &LanguageCode,
+    text: &'a str,
+) -> Cow<'a, str> {
+    let trimmed = text.trim();
+    if from_code.as_str() != "km" || !trimmed.contains('\u{200b}') {
+        return Cow::Borrowed(trimmed);
+    }
+    Cow::Owned(trimmed.replace('\u{200b}', ""))
+}
+
+/// `source_text` returned to callers: Khmer uses the prepared string the engine
+/// saw; other languages keep the original input (see translate_text_with_alternatives).
+fn km_engine_source_text(
+    from_code: &LanguageCode,
+    original: &str,
+    prepared: &str,
+) -> String {
+    if from_code.as_str() == "km" {
+        prepared.to_string()
+    } else {
+        original.to_string()
+    }
+}
+
+/// Normalize batch inputs for the first hop of `plan` (pivot strips on km→* only).
+fn prepare_texts_for_plan(plan: &TranslationPlan, texts: &[String]) -> Vec<String> {
+    let Some(from) = plan.steps.first().map(|step| step.from_code.as_str()) else {
+        return texts.to_vec();
+    };
+    let from_code = LanguageCode::from(from);
+    texts
+        .iter()
+        .map(|text| prepare_source_text(&from_code, text).into_owned())
+        .collect()
 }
 
 fn plain_translation(text: String) -> TranslationWithAlternatives {
@@ -582,9 +630,10 @@ pub fn execute_translation_plan(
     texts: &[String],
 ) -> Result<Vec<String>, String> {
     ensure_plan_loaded(engine, plan)?;
+    let texts = prepare_texts_for_plan(plan, texts);
     match plan.steps.as_slice() {
-        [step] => engine.translate_multiple(texts, &step.cache_key),
-        [first, second] => engine.pivot_multiple(&first.cache_key, &second.cache_key, texts),
+        [step] => engine.translate_multiple(&texts, &step.cache_key),
+        [first, second] => engine.pivot_multiple(&first.cache_key, &second.cache_key, &texts),
         _ => Ok(Vec::new()),
     }
 }
@@ -598,10 +647,11 @@ pub fn execute_translation_plan_ctx(
     ctx: &TranslateCtx,
 ) -> Result<Option<Vec<String>>, String> {
     ensure_plan_loaded(engine, plan)?;
+    let texts = prepare_texts_for_plan(plan, texts);
     match plan.steps.as_slice() {
-        [step] => engine.translate_multiple_ctx(texts, &step.cache_key, ctx),
+        [step] => engine.translate_multiple_ctx(&texts, &step.cache_key, ctx),
         [first, second] => {
-            engine.pivot_multiple_ctx(&first.cache_key, &second.cache_key, texts, ctx)
+            engine.pivot_multiple_ctx(&first.cache_key, &second.cache_key, &texts, ctx)
         }
         _ => Ok(Some(Vec::new())),
     }
@@ -613,15 +663,16 @@ pub fn execute_translation_plan_with_alignment(
     texts: &[String],
 ) -> Result<Vec<TranslationWithAlignment>, String> {
     ensure_plan_loaded(engine, plan)?;
+    let texts = prepare_texts_for_plan(plan, texts);
     if log::log_enabled!(log::Level::Trace) {
         for (i, t) in texts.iter().enumerate() {
             log::trace!("[bergamot in {i}/{}] {:?}", texts.len(), t);
         }
     }
     let result = match plan.steps.as_slice() {
-        [step] => engine.translate_multiple_with_alignment(texts, &step.cache_key),
+        [step] => engine.translate_multiple_with_alignment(&texts, &step.cache_key),
         [first, second] => {
-            engine.pivot_multiple_with_alignment(&first.cache_key, &second.cache_key, texts)
+            engine.pivot_multiple_with_alignment(&first.cache_key, &second.cache_key, &texts)
         }
         _ => Ok(Vec::new()),
     }?;
@@ -646,12 +697,13 @@ pub fn execute_translation_plan_with_alignment_ctx(
     ctx: &TranslateCtx,
 ) -> Result<Option<Vec<TranslationWithAlignment>>, String> {
     ensure_plan_loaded(engine, plan)?;
+    let texts = prepare_texts_for_plan(plan, texts);
     match plan.steps.as_slice() {
-        [step] => engine.translate_multiple_with_alignment_ctx(texts, &step.cache_key, ctx),
+        [step] => engine.translate_multiple_with_alignment_ctx(&texts, &step.cache_key, ctx),
         [first, second] => engine.pivot_multiple_with_alignment_ctx(
             &first.cache_key,
             &second.cache_key,
-            texts,
+            &texts,
             ctx,
         ),
         _ => Ok(Some(Vec::new())),
@@ -701,6 +753,104 @@ mod tests {
     }
 
     use super::*;
+    use translator_core::api::LanguageCode;
+
+    #[test]
+    fn khmer_source_strips_zwsp_only() {
+        let km = LanguageCode::from("km");
+        let en = LanguageCode::from("en");
+        let zwsp = "\u{200b}";
+        assert_eq!(
+            prepare_source_text(&km, &format!("hello{zwsp}world")),
+            "helloworld"
+        );
+        assert_eq!(
+            prepare_source_text(&en, &format!("hello{zwsp}world")),
+            format!("hello{zwsp}world")
+        );
+        assert_eq!(prepare_source_text(&km, "  \u{200b}\u{200b}  "), "");
+        assert_eq!(prepare_source_text(&km, ""), "");
+        assert_eq!(
+            prepare_source_text(&km, "a\u{200c}b\u{200d}c"),
+            "a\u{200c}b\u{200d}c"
+        );
+    }
+
+    #[test]
+    fn non_khmer_zwsp_unchanged_in_prepare_and_plan_batch() {
+        let en = LanguageCode::from("en");
+        let zwsp = "\u{200b}";
+        let raw = format!("  x{zwsp}y  ");
+        assert_eq!(prepare_source_text(&en, &raw), format!("x{zwsp}y"));
+        let plan = TranslationPlan {
+            steps: vec![TranslationStep {
+                from_code: "en".into(),
+                to_code: "es".into(),
+                cache_key: "en-es".into(),
+                paths: ModelPaths {
+                    model: PathBuf::new(),
+                    vocabulary: PathBuf::new(),
+                    shortlist: None,
+                    target_vocabulary: None,
+                },
+            }],
+        };
+        assert_eq!(
+            prepare_texts_for_plan(&plan, &[raw.clone()]),
+            vec![format!("x{zwsp}y")]
+        );
+    }
+
+    #[test]
+    fn pivot_plan_prepare_strips_km_on_first_hop_inputs_only() {
+        let zwsp = "\u{200b}";
+        let plan = TranslationPlan {
+            steps: vec![
+                TranslationStep {
+                    from_code: "km".into(),
+                    to_code: "en".into(),
+                    cache_key: "km-en".into(),
+                    paths: ModelPaths {
+                        model: PathBuf::new(),
+                        vocabulary: PathBuf::new(),
+                        shortlist: None,
+                        target_vocabulary: None,
+                    },
+                },
+                TranslationStep {
+                    from_code: "en".into(),
+                    to_code: "es".into(),
+                    cache_key: "en-es".into(),
+                    paths: ModelPaths {
+                        model: PathBuf::new(),
+                        vocabulary: PathBuf::new(),
+                        shortlist: None,
+                        target_vocabulary: None,
+                    },
+                },
+            ],
+        };
+        assert_eq!(
+            prepare_texts_for_plan(&plan, &[format!("a{zwsp}b")]),
+            vec!["ab".to_string()]
+        );
+    }
+
+    /// Mirrors translate → steer: `source_text` for Khmer is the prepared string;
+    /// steer must receive the same prepared text the engine saw on translate.
+    #[test]
+    fn khmer_alternatives_then_steer_use_stripped_engine_source() {
+        let km = LanguageCode::from("km");
+        let zwsp = "\u{200b}";
+        let raw = format!("  word{zwsp}two  ");
+        let prepared = prepare_source_text(&km, &raw);
+        assert_eq!(prepared, "wordtwo");
+        let stored = km_engine_source_text(&km, &raw, &prepared);
+        assert_eq!(stored, "wordtwo");
+        let steer_input = prepare_source_text(&km, &stored);
+        assert_eq!(steer_input, "wordtwo");
+        assert_eq!(steer_input, prepared);
+    }
 
     fn line_with_leading_alternative(text: &str, len: u64) -> TranslationWithAlternatives {
         TranslationWithAlternatives {
