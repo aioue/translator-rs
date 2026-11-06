@@ -42,6 +42,12 @@ for t in test_short_block.py test_handoff.py test_gen_pairs.py test_vllm_truncat
 
 Optional, if you have Docker: `cargo test -p translator-translate --lib khmer_source_strips_zwsp_only` (the Rust crate needs cmake and clang).
 
+## Which model to use
+
+Prefer the strongest code-capable model you have (for example Claude Opus or Sonnet in Claude Code, or a GPT-5-class model in Codex),
+and let it run the tests rather than only read the diff. Anything you can kindly provide is welcome, including a human read.
+Please say which model and version you used in `FINDINGS.md`.
+
 ## What to hand back
 
 One file, `FINDINGS.md`, using the template in [FINDINGS-TEMPLATE.md](FINDINGS-TEMPLATE.md). Rank findings by severity. Give the file and line, what goes wrong, and how you know (a command, a test you wrote, or reasoning from the code). Say clearly which findings you verified by running something and which you inferred.

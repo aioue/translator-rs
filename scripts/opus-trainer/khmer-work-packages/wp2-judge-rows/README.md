@@ -1,8 +1,11 @@
 # WP2: rate 21,984 generated English-Khmer pairs
 
 Goal: give every short generated pair a quality score, so wrong ones can be set aside before training.
-The 55 sheets in [sheets/](sheets/) hold 21,984 pairs (400 per sheet, the last has 384): signage, notices and app strings,
-mixed in random order. Each pair is an English phrase and its Khmer translation. They are machine-generated.
+The 55 sheets hold 21,984 pairs (400 per sheet, the last has 384): signage, notices and app strings,
+mixed in random order. Each pair is an English phrase and its Khmer translation, machine-generated.
+
+The sheets are not in this repository. Download `khmer-wp2-judging-sheets.zip` from the link the person who sent you here gave you
+(SHA-256 `958a69e6d774a7891a11daf56d48555ff60ed3a4aa9176626655fb6fb7c372e1`), unzip it into this directory so that `sheets/sheet-001.tsv` exists, and carry on.
 
 ## Your job, per sheet
 
@@ -25,6 +28,13 @@ The prompt to give an AI rater is in [PROMPT.md](PROMPT.md). You can do any numb
 - Names, brand names and technical terms left in Latin letters are fine when the English contains them.
 - Safety wording matters more than style: allergens, warnings, medicine and electrical notices that are wrong deserve a 1.
 - Rate each row on its own. Do not try to work out where it came from.
+
+## Which models to use
+
+Use the strongest model you have, for example a current Claude Opus or Sonnet, a GPT-5-class model, or a Gemini Pro-class model.
+In our own checks a small, fast Claude Haiku-class model and a Gemini Flash-class model were both usable judges, so a smaller model
+is fine too. None of these judges is a native Khmer speaker. Anything you can kindly provide is welcome: please write the model and
+version you used at the top of the message you send back.
 
 ## Returning results
 
