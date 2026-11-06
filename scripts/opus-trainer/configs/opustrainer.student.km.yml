@@ -21,11 +21,12 @@
 # identical. Copied from the Georgian variant (opustrainer.student.ka.yml), whose
 # header explains why TitleCase must be zeroed explicitly.
 #
-# UNVERIFIED for Khmer: Typos and Noise pick "words" by whitespace, and Khmer
-# spaces separate phrases, so on a Khmer source line they act on whole phrases,
-# and character swaps can break a consonant cluster into an invalid sequence.
-# Inspect a sample of the augmented stream before the first full run and lower
-# Typos on the Khmer side if it produces malformed clusters.
+# Measured 2026-11-03 (OpusTrainer 0.5, seed 1111, three seeds, 20k augmented lines
+# each, train.tsv 17,966 lines): Typos edits field 0 (Khmer) only. New malformed
+# Khmer clusters introduced by augmentation: 48–59 per 17,966 (~0.3%); mostly
+# leading_combining from char swaps. RemoveEndPunct produced 53–62 blank alignment
+# columns, all on one-token Khmer lines. Noise synthetic lines ~0.08%. Still decide
+# whether Typos: 0.05 on the Khmer side is worth lowering given ~0.3% malformed rate.
 datasets:
   original: __TSV__
 
