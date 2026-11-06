@@ -4,7 +4,7 @@ Goal: give every short generated pair a quality score, so wrong ones can be set 
 The 55 sheets hold 21,984 pairs (400 per sheet, the last has 384): signage, notices and app strings,
 mixed in random order. Each pair is an English phrase and its Khmer translation, machine-generated.
 
-The sheets are not in this repository. Download `khmer-wp2-judging-sheets.zip` from the link the person who sent you here gave you
+The sheets are not in this repository. Download `khmer-wp2-judging-sheets.zip` from this Google Drive folder: https://drive.google.com/drive/folders/1TepAqJr712lQUq-N0VC_8YEIrNnUxdBL?usp=sharing
 (SHA-256 `958a69e6d774a7891a11daf56d48555ff60ed3a4aa9176626655fb6fb7c372e1`), unzip it into this directory so that `sheets/sheet-001.tsv` exists, and carry on.
 
 ## Your job, per sheet

@@ -13,6 +13,8 @@ Each can be done in a single Claude or ChatGPT session (or a few), by a person o
 | [WP2: judge generated rows](wp2-judge-rows/README.md) | Rate 21,984 short English-Khmer pairs, 400 per sheet | `ratings-NNN.tsv` files | about 15 minutes per sheet, any number of sheets |
 | [WP3: write short text](wp3-generate-short-text/README.md) | Fill in prompts for signs, labels, menus and notices (25 prompts per batch, 29 batches) | `responses/*.json` per batch | about an hour per batch, any number of batches |
 
+Data for WP2 and WP3 (two zip files with checksums) is in this Google Drive folder: https://drive.google.com/drive/folders/1TepAqJr712lQUq-N0VC_8YEIrNnUxdBL?usp=sharing
+
 ## Ground rules
 
 - Nothing here needs a password, API key or account of ours. If something asks for one, stop and say so.

@@ -4,7 +4,7 @@ Goal: more realistic short English-Khmer pairs. Real data for these is almost no
 it. We have about 38,500 rows and want more variety, in the registers with the fewest repeats (menus, notices, labels).
 
 There are 707 prompts ("cells", each a situation such as allergen labels or vaccination notices, a surface form and a length band),
-split into 29 batches of 25. The batches are not in this repository: download `khmer-wp3-prompt-batches.zip` from the link the person who sent you here gave you
+split into 29 batches of 25. The batches are not in this repository: download `khmer-wp3-prompt-batches.zip` from this Google Drive folder: https://drive.google.com/drive/folders/1TepAqJr712lQUq-N0VC_8YEIrNnUxdBL?usp=sharing
 (SHA-256 `8313020e480e4b66d4a903217ac4d8d5d78fc0c5dcafc26c571f776f98f7d94a`) and unzip it into this directory so that `batches/batch-01/manifest.json` exists. (The prompts contain lists of text already written, which we share separately.) Batches 1 to 13 are cells nobody has filled yet, batch 14 is a mix, and later batches repeat cells that an
 open-weights model already filled, so we get a second view of them. Start with `batch-01`: it doubles as a pilot, and we will check
 its output before asking you for more.
