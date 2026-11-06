@@ -34,6 +34,7 @@ import pathlib
 import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 
 from gen_sft import BACKENDS, strip_fences
 from pair_spec import (
@@ -87,6 +88,73 @@ def load_have(jobs_dir: pathlib.Path, spec: Spec) -> dict[str, list[str]]:
     return have
 
 
+HANDOFF_SYSTEM_MARKER = "---SYSTEM---"
+HANDOFF_USER_MARKER = "---USER---"
+
+
+def format_gen_messages(spec: Spec, user_prompt: str) -> str:
+    """Exact system and user text `gen` sends through the CLI backends."""
+    return (f"{HANDOFF_SYSTEM_MARKER}\n{spec.system}\n"
+            f"{HANDOFF_USER_MARKER}\n{user_prompt}")
+
+
+def parse_model_array(raw: str, spec: Spec) -> tuple[list[PairRow], int]:
+    return parse_rows(json.loads(strip_fences(raw)), spec)
+
+
+def write_job_file(
+    path: pathlib.Path,
+    job: Job,
+    spec: Spec,
+    rows: list[PairRow],
+    malformed: int,
+    *,
+    gen: str,
+    effort: str,
+    backend: str,
+    extra: dict | None = None,
+) -> None:
+    payload: dict = {
+        "job": {"key": job.key, "register": job.register, "category": job.category,
+                "form": job.form, "band": job.band, "n": job.n,
+                "numbers": str(job.numbers)},
+        "gen": gen, "effort": effort, "backend": backend,
+        "prompt_version": spec.prompt_version, "spec_sha": spec.sha,
+        "malformed": malformed,
+        "rows": [{"en": r.en, spec.code: r.target} for r in rows],
+    }
+    if extra:
+        payload.update(extra)
+    # Written aside and renamed, because `build` is run against this
+    # directory while generation is still going: a reader must see either
+    # the whole cell or no cell, never half a JSON file.
+    tmp = path.with_suffix(".json.part")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    tmp.rename(path)
+
+
+def prepare_todo_jobs(spec: Spec, a: argparse.Namespace,
+                      jobs_dir: pathlib.Path) -> tuple[list[Job], list[Job]]:
+    have = load_have(jobs_dir, spec)
+    jobs = build_jobs(
+        spec, a.rounds, have,
+        registers=[x for x in a.registers.split(",") if x],
+        forms=[x for x in a.forms.split(",") if x],
+        bands=[x for x in a.bands.split(",") if x],
+        per_cell=a.per_cell,
+    )
+    if a.shuffle_seed:
+        random.Random(a.shuffle_seed).shuffle(jobs)
+    shard_i, _, shard_n = a.shard.partition("/")
+    shard_i, shard_n = int(shard_i), int(shard_n or 1)
+    if shard_n > 1:
+        jobs = [j for k, j in enumerate(jobs) if k % shard_n == shard_i]
+    todo = [j for j in jobs if not (jobs_dir / f"{j.key}.json").exists()]
+    if a.limit:
+        todo = todo[: a.limit]
+    return jobs, todo
+
+
 def run_job(job: Job, spec: Spec, model: str, effort: str,
             jobs_dir: pathlib.Path, backend: str = "codex") -> int:
     path = jobs_dir / f"{job.key}.json"
@@ -95,27 +163,15 @@ def run_job(job: Job, spec: Spec, model: str, effort: str,
         prompt = job.prompt if attempt == 0 else job.prompt + "\n\nReturn a bare JSON array only."
         resp = BACKENDS[backend](model, spec.system, prompt, effort)
         try:
-            rows, malformed = parse_rows(json.loads(strip_fences(resp["result"])), spec)
+            rows, malformed = parse_model_array(resp["result"], spec)
         except (json.JSONDecodeError, ValueError) as e:
             last = str(e)[:200]
             continue
         if not rows:
             last = "no usable objects in response"
             continue
-        # Written aside and renamed, because `build` is run against this
-        # directory while generation is still going: a reader must see either
-        # the whole cell or no cell, never half a JSON file.
-        tmp = path.with_suffix(".json.part")
-        tmp.write_text(json.dumps({
-            "job": {"key": job.key, "register": job.register, "category": job.category,
-                    "form": job.form, "band": job.band, "n": job.n,
-                    "numbers": str(job.numbers)},
-            "gen": model, "effort": effort, "backend": backend,
-            "prompt_version": spec.prompt_version, "spec_sha": spec.sha,
-            "malformed": malformed,
-            "rows": [{"en": r.en, spec.code: r.target} for r in rows],
-        }, ensure_ascii=False), encoding="utf-8")
-        tmp.rename(path)
+        write_job_file(path, job, spec, rows, malformed,
+                       gen=model, effort=effort, backend=backend)
         return len(rows)
     raise RuntimeError(f"batch failed after retry ({last})")
 
@@ -154,22 +210,7 @@ def cmd_gen(a: argparse.Namespace) -> None:
           f"{written} rows already written across {max(len(have) - 1, 0)} categories",
           flush=True)
 
-    jobs = build_jobs(
-        spec, a.rounds, have,
-        registers=[x for x in a.registers.split(",") if x],
-        forms=[x for x in a.forms.split(",") if x],
-        bands=[x for x in a.bands.split(",") if x],
-        per_cell=a.per_cell,
-    )
-    if a.shuffle_seed:
-        random.Random(a.shuffle_seed).shuffle(jobs)
-    shard_i, _, shard_n = a.shard.partition("/")
-    shard_i, shard_n = int(shard_i), int(shard_n or 1)
-    if shard_n > 1:
-        jobs = [j for k, j in enumerate(jobs) if k % shard_n == shard_i]
-    todo = [j for j in jobs if not (jobs_dir / f"{j.key}.json").exists()]
-    if a.limit:
-        todo = todo[: a.limit]
+    jobs, todo = prepare_todo_jobs(spec, a, jobs_dir)
     print(f"{len(jobs) - len(todo)} of {len(jobs)} cells done, {len(todo)} to fetch "
           f"({sum(j.n for j in todo)} rows asked) via {a.model}/{a.effort}, "
           f"{a.workers} workers", flush=True)
@@ -190,6 +231,109 @@ def cmd_gen(a: argparse.Namespace) -> None:
                 print(f"  [FAIL] {job.key}: {str(e)[:300]}", flush=True)
     print(f"\n{ok} cells ok ({got} rows), {fail} failed. Re-run to retry failures.",
           flush=True)
+
+
+def cmd_export_prompts(a: argparse.Namespace) -> None:
+    spec = load_spec(a.spec)
+    enforce_km_gen_guard(spec, a.spec, a.rounds)
+    jobs_dir = a.out / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    _, todo = prepare_todo_jobs(spec, a, jobs_dir)
+    prompts_dir = a.batch_dir / "prompts"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    for job in todo:
+        (prompts_dir / f"{job.key}.txt").write_text(
+            format_gen_messages(spec, job.prompt), encoding="utf-8")
+    manifest = {
+        "spec_sha": spec.sha,
+        "prompt_version": spec.prompt_version,
+        "code": spec.code,
+        "rounds": a.rounds,
+        "keys": [j.key for j in todo],
+    }
+    a.batch_dir.mkdir(parents=True, exist_ok=True)
+    (a.batch_dir / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"exported {len(todo)} prompts -> {prompts_dir}\n"
+          f"manifest -> {a.batch_dir / 'manifest.json'}", flush=True)
+
+
+def cmd_import_responses(a: argparse.Namespace) -> None:
+    from check_handoff import load_manifest, response_text_errors
+
+    spec = load_spec(a.spec)
+    jobs_dir = a.out / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    manifest = load_manifest(a.batch_dir)
+    if manifest.get("spec_sha") and manifest["spec_sha"] != spec.sha:
+        print(f"manifest spec_sha {manifest['spec_sha']!r} != spec {spec.sha!r}",
+              flush=True)
+        sys.exit(2)
+    manifest_keys = set(manifest.get("keys") or [])
+    responses_dir = a.batch_dir / "responses"
+    if not responses_dir.is_dir():
+        sys.exit(f"missing {responses_dir}")
+    imported_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    grid_rounds = int(manifest.get("rounds") or 1)
+    jobs_by_key = {j.key: j for j in build_jobs(spec, grid_rounds, {})}
+    accepted = rejected = 0
+    for path in sorted(responses_dir.glob("*.json")):
+        key = path.stem
+        if key not in manifest_keys:
+            rejected += 1
+            print(f"  [reject] {key}: not in manifest", flush=True)
+            continue
+        out_path = jobs_dir / f"{key}.json"
+        if out_path.exists():
+            rejected += 1
+            print(f"  [reject] {key}: job file already exists", flush=True)
+            continue
+        raw = path.read_text(encoding="utf-8")
+        pre = response_text_errors(raw, spec.code)
+        if pre:
+            rejected += 1
+            print(f"  [reject] {key}: {'; '.join(pre)}", flush=True)
+            continue
+        try:
+            rows, malformed = parse_model_array(raw, spec)
+        except (json.JSONDecodeError, ValueError) as e:
+            rejected += 1
+            print(f"  [reject] {key}: {str(e)[:200]}", flush=True)
+            continue
+        if not rows:
+            rejected += 1
+            print(f"  [reject] {key}: no usable rows", flush=True)
+            continue
+        job = jobs_by_key.get(key)
+        if job is None:
+            rejected += 1
+            print(f"  [reject] {key}: no job metadata for this key", flush=True)
+            continue
+        write_job_file(
+            out_path, job, spec, rows, malformed,
+            gen=a.model_label, effort="low", backend="handoff",
+            extra={
+                "source_model": a.model_label,
+                "source_backend": "handoff",
+                "imported_at": imported_at,
+            },
+        )
+        accepted += 1
+        print(f"  [ok] {key}: {len(rows)} rows (malformed {malformed})", flush=True)
+    print(f"\nimport-responses: {accepted} accepted, {rejected} rejected", flush=True)
+
+
+def add_gen_grid_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--rounds", type=int, default=1,
+                   help="how many times each cell is asked; a later round names "
+                        "what the earlier ones wrote, so raise it to widen the set")
+    p.add_argument("--per-cell", type=int, default=0, help="override the spec's rows per cell")
+    p.add_argument("--registers", default="", help="comma-separated subset")
+    p.add_argument("--forms", default="", help="comma-separated subset")
+    p.add_argument("--bands", default="", help="comma-separated subset")
+    p.add_argument("--limit", type=int, default=0, help="cap cells fetched this run")
+    p.add_argument("--shard", default="0/1", help="i/n: take cells where index %% n == i")
+    p.add_argument("--shuffle-seed", type=int, default=0)
 
 
 # --------------------------------------------------------------------- build
@@ -524,23 +668,29 @@ def main() -> None:
     g.add_argument("--effort", default="low")
     g.add_argument("--backend", choices=sorted(BACKENDS), default="codex", help=BACKEND_HELP)
     g.add_argument("--workers", type=int, default=4)
-    g.add_argument("--rounds", type=int, default=1,
-                   help="how many times each cell is asked; a later round names "
-                        "what the earlier ones wrote, so raise it to widen the set")
-    g.add_argument("--per-cell", type=int, default=0, help="override the spec's rows per cell")
-    g.add_argument("--registers", default="", help="comma-separated subset")
-    g.add_argument("--forms", default="", help="comma-separated subset")
-    g.add_argument("--bands", default="", help="comma-separated subset")
-    g.add_argument("--limit", type=int, default=0, help="cap cells fetched this run")
-    # Two processes on one job directory would otherwise walk the same todo list
-    # in the same order and spend the second process re-fetching what the first
-    # is already fetching. Sharding by index makes the split disjoint.
-    g.add_argument("--shard", default="0/1", help="i/n: take cells where index %% n == i")
-    # Cells are built register by register, so a run stopped short covers the
-    # first categories at every form and the last ones not at all. Shuffling
-    # makes any prefix a spread across the whole grid instead.
-    g.add_argument("--shuffle-seed", type=int, default=0)
+    add_gen_grid_flags(g)
     g.set_defaults(func=cmd_gen)
+
+    e = sub.add_parser(
+        "export-prompts",
+        help="write handoff prompt files for an external model agent",
+    )
+    e.add_argument("--spec", required=True, type=pathlib.Path)
+    e.add_argument("--out", required=True, type=pathlib.Path)
+    e.add_argument("--batch-dir", required=True, type=pathlib.Path)
+    add_gen_grid_flags(e)
+    e.set_defaults(func=cmd_export_prompts)
+
+    i = sub.add_parser(
+        "import-responses",
+        help="import handoff JSON responses into job files",
+    )
+    i.add_argument("--spec", required=True, type=pathlib.Path)
+    i.add_argument("--out", required=True, type=pathlib.Path)
+    i.add_argument("--batch-dir", required=True, type=pathlib.Path)
+    i.add_argument("--model-label", required=True,
+                   help="provenance label for the model that wrote the responses")
+    i.set_defaults(func=cmd_import_responses)
 
     b = sub.add_parser("build", help="gate, exclude, dedup and emit the corpus")
     b.add_argument("--spec", required=True, type=pathlib.Path)
